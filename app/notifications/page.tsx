@@ -37,7 +37,7 @@ export default function Notifications() {
         .order('created_at', { ascending: false })
 
       if (error) console.error(error)
-      else setNotifications(data || [])
+      else setNotifications(data as any [])
       setLoading(false)
     }
 
