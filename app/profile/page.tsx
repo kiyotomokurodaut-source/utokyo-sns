@@ -10,11 +10,12 @@ export default function Profile() {
   const [faculty, setFaculty] = useState('')
   const [grade, setGrade] = useState<number>(1)
   const [bio, setBio] = useState('')
-  const [avatarUrl, setAvatarUrl] = useState('') 
+  const [avatarUrl, setAvatarUrl] = useState('')
   const [msg, setMsg] = useState('')
   const [loading, setLoading] = useState(true)
   const [hasProfile, setHasProfile] = useState(false)
-  const [uploading, setUploading] = useState(false) 
+  const [uploading, setUploading] = useState(false)
+  const [userId, setUserId] = useState<string | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -23,6 +24,7 @@ export default function Profile() {
         router.push('/login')
         return
       }
+      setUserId(user.id)
       const { data } = await supabase
         .from('profiles')
         .select('*')
@@ -34,7 +36,7 @@ export default function Profile() {
         setFaculty(data.faculty || '')
         setGrade(data.grade || 1)
         setBio(data.bio || '')
-        setAvatarUrl(data.avatar_url || '') 
+        setAvatarUrl(data.avatar_url || '')
         setHasProfile(true)
       }
       setLoading(false)
@@ -47,9 +49,11 @@ export default function Profile() {
       setUploading(true)
       const file = e.target.files?.[0]
       if (!file) return
+      if (!userId) throw new Error('ログインしてください')
+      if (file.size > 5 * 1024 * 1024) throw new Error('画像は5MB以下にしてください')
 
       const fileExt = file.name.split('.').pop()
-      const fileName = `${Math.random()}.${fileExt}`
+      const fileName = `${userId}/${Date.now()}.${fileExt}`
 
       const { error: uploadError } = await supabase.storage
         .from('avatars')
@@ -77,7 +81,7 @@ export default function Profile() {
       faculty,
       grade,
       bio,
-      avatar_url: avatarUrl 
+      avatar_url: avatarUrl
     }
 
     const { error } = hasProfile
