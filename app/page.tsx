@@ -9,7 +9,7 @@ type Post = {
   image_url: string | null
   user_id: string
   created_at: string
-  profiles: { handle: string; display_name: string; avatar_url?: string } | null
+  profile: { handle: string; display_name: string; avatar_url?: string } | null
   like_count: number
   liked_by_me: boolean
 }
@@ -28,20 +28,31 @@ export default function Home() {
     const { data: { user: currentUser } } = await supabase.auth.getUser()
     setUser(currentUser)
 
-    const { data, error } = await supabase
+    // posts を取得 (JOINは使わず、user_id をあとで profiles と結合する)
+    const { data: postsData, error } = await supabase
       .from('posts')
-      .select('id, body, image_url, user_id, created_at, profiles(handle, display_name, avatar_url), likes(user_id)')
+      .select('id, body, image_url, user_id, created_at, likes(user_id)')
       .order('created_at', { ascending: false })
       .limit(50)
 
     if (error) {
-      console.error('load error:', error)
+      console.error('posts load error:', error)
       setLoading(false)
       return
     }
 
-    const enriched = (data || []).map((p: any) => ({
+    // profiles を別クエリで取得
+    const userIds = [...new Set((postsData || []).map((p: any) => p.user_id))]
+    const { data: profilesData } = await supabase
+      .from('profiles')
+      .select('id, handle, display_name, avatar_url')
+      .in('id', userIds)
+
+    const profileMap = new Map((profilesData || []).map((p: any) => [p.id, p]))
+
+    const enriched = (postsData || []).map((p: any) => ({
       ...p,
+      profile: profileMap.get(p.user_id) || null,
       like_count: p.likes?.length || 0,
       liked_by_me: currentUser ? p.likes?.some((l: any) => l.user_id === currentUser.id) : false,
     }))
@@ -167,12 +178,7 @@ export default function Home() {
           {file && (
             <div className="mt-2 text-sm text-gray-600">
               📎 {file.name}
-              <button
-                onClick={() => setFile(null)}
-                className="ml-2 text-red-500"
-              >
-                ✕
-              </button>
+              <button onClick={() => setFile(null)} className="ml-2 text-red-500">✕</button>
             </div>
           )}
           <div className="mt-2 flex items-center justify-between">
@@ -205,15 +211,11 @@ export default function Home() {
         {posts.map(p => (
           <li key={p.id} className="border-b py-3">
             <div className="text-sm text-gray-500 mb-1">
-              @{p.profiles?.handle || 'unknown'} ({p.profiles?.display_name || '名無し'})
+              @{p.profile?.handle || 'unknown'} ({p.profile?.display_name || '名無し'})
             </div>
             {p.body && <div className="whitespace-pre-wrap mb-2">{p.body}</div>}
             {p.image_url && (
-              <img
-                src={p.image_url}
-                alt=""
-                className="mt-2 rounded-lg max-h-96 border"
-              />
+              <img src={p.image_url} alt="" className="mt-2 rounded-lg max-h-96 border" />
             )}
             <div className="flex gap-4 text-sm text-gray-600 mt-2">
               <button
@@ -224,18 +226,8 @@ export default function Home() {
               </button>
               {user && p.user_id === user.id && (
                 <>
-                  <button
-                    onClick={() => editPost(p.id, p.body || '')}
-                    className="text-blue-500 hover:underline"
-                  >
-                    編集
-                  </button>
-                  <button
-                    onClick={() => deletePost(p.id)}
-                    className="text-red-500 hover:underline"
-                  >
-                    削除
-                  </button>
+                  <button onClick={() => editPost(p.id, p.body || '')} className="text-blue-500 hover:underline">編集</button>
+                  <button onClick={() => deletePost(p.id)} className="text-red-500 hover:underline">削除</button>
                 </>
               )}
             </div>
