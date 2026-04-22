@@ -5,14 +5,13 @@ import { useRouter } from 'next/navigation'
 
 type Post = {
   id: number
-  body: string
-  image_url?: string | null
+  body: string | null
+  image_url: string | null
   user_id: string
   created_at: string
   profiles: { handle: string; display_name: string; avatar_url?: string } | null
-  likes: { user_id: string }[]
-  liked_by_me: boolean
   like_count: number
+  liked_by_me: boolean
 }
 
 export default function Home() {
@@ -21,75 +20,87 @@ export default function Home() {
   const [body, setBody] = useState('')
   const [user, setUser] = useState<any>(null)
   const [file, setFile] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
+  const [posting, setPosting] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   const load = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    const { data } = await supabase
+    setLoading(true)
+    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    setUser(currentUser)
+
+    const { data, error } = await supabase
       .from('posts')
       .select('id, body, image_url, user_id, created_at, profiles(handle, display_name, avatar_url), likes(user_id)')
       .order('created_at', { ascending: false })
       .limit(50)
 
+    if (error) {
+      console.error('load error:', error)
+      setLoading(false)
+      return
+    }
+
     const enriched = (data || []).map((p: any) => ({
       ...p,
       like_count: p.likes?.length || 0,
-      liked_by_me: user ? p.likes?.some((l: any) => l.user_id === user.id) : false,
+      liked_by_me: currentUser ? p.likes?.some((l: any) => l.user_id === currentUser.id) : false,
     }))
     setPosts(enriched)
+    setLoading(false)
   }
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => setUser(user))
     load()
   }, [])
 
   const post = async () => {
     if (!user) return alert('ログインしてください')
     if (!body.trim() && !file) return alert('本文または画像を入力してください')
-    setUploading(true)
+    setPosting(true)
 
     let imageUrl: string | null = null
 
-    if (file) {
-      // ファイルサイズチェック (5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        alert('画像は5MB以下にしてください')
-        setUploading(false)
-        return
+    try {
+      if (file) {
+        if (file.size > 5 * 1024 * 1024) {
+          alert('画像は5MB以下にしてください')
+          setPosting(false)
+          return
+        }
+
+        const ext = file.name.split('.').pop()
+        const path = `${user.id}/${Date.now()}.${ext}`
+        const { error: uploadErr } = await supabase.storage
+          .from('posts')
+          .upload(path, file)
+
+        if (uploadErr) {
+          alert('画像アップロード失敗: ' + uploadErr.message)
+          setPosting(false)
+          return
+        }
+
+        const { data: urlData } = supabase.storage.from('posts').getPublicUrl(path)
+        imageUrl = urlData.publicUrl
       }
 
-      const ext = file.name.split('.').pop()
-      const path = `${user.id}/${Date.now()}.${ext}`
-      const { error: uploadErr } = await supabase.storage
-        .from('posts')
-        .upload(path, file)
+      const { error } = await supabase.rpc('create_post_with_image', {
+        post_body: body || '',
+        image_url: imageUrl,
+      })
 
-      if (uploadErr) {
-        alert('画像アップロード失敗: ' + uploadErr.message)
-        setUploading(false)
-        return
+      if (error) {
+        alert('投稿失敗: ' + error.message)
+      } else {
+        setBody('')
+        setFile(null)
+        await load()
       }
-
-      const { data: urlData } = supabase.storage
-        .from('posts')
-        .getPublicUrl(path)
-      imageUrl = urlData.publicUrl
+    } catch (e: any) {
+      alert('エラー: ' + e.message)
+    } finally {
+      setPosting(false)
     }
-
-    const { error } = await supabase.rpc('create_post_with_image', {
-      post_body: body,
-      image_url: imageUrl,
-    })
-
-    if (error) {
-      alert(error.message)
-    } else {
-      setBody('')
-      setFile(null)
-      load()
-    }
-    setUploading(false)
   }
 
   const toggleLike = async (postId: number) => {
@@ -125,9 +136,9 @@ export default function Home() {
 
   return (
     <div className="max-w-xl mx-auto p-4">
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
         <h1 className="text-2xl font-bold">UTokyo SNS</h1>
-        <div className="text-sm flex items-center gap-3">
+        <div className="text-sm flex items-center gap-3 flex-wrap">
           {user ? (
             <>
               <a href="/search" className="text-blue-500 underline">検索</a>
@@ -145,19 +156,19 @@ export default function Home() {
 
       {user && (
         <div className="mb-4 border rounded-lg p-3">
-          <textarea 
-            className="border w-full p-2 rounded" 
+          <textarea
+            className="border w-full p-2 rounded"
             value={body}
-            onChange={e => setBody(e.target.value)} 
+            onChange={e => setBody(e.target.value)}
             maxLength={500}
-            placeholder="いまどうしてる?" 
-            rows={3} 
+            placeholder="いまどうしてる?"
+            rows={3}
           />
           {file && (
             <div className="mt-2 text-sm text-gray-600">
               📎 {file.name}
-              <button 
-                onClick={() => setFile(null)} 
+              <button
+                onClick={() => setFile(null)}
                 className="ml-2 text-red-500"
               >
                 ✕
@@ -167,36 +178,40 @@ export default function Home() {
           <div className="mt-2 flex items-center justify-between">
             <label className="cursor-pointer text-blue-500 text-sm">
               📷 画像
-              <input 
-                type="file" 
+              <input
+                type="file"
                 accept="image/*"
                 onChange={e => setFile(e.target.files?.[0] || null)}
-                className="hidden" 
+                className="hidden"
               />
             </label>
-            <button 
-              onClick={post} 
-              disabled={uploading}
+            <button
+              onClick={post}
+              disabled={posting}
               className="bg-blue-500 text-white px-4 py-2 rounded disabled:opacity-50"
             >
-              {uploading ? '送信中…' : '投稿'}
+              {posting ? '送信中…' : '投稿'}
             </button>
           </div>
         </div>
       )}
 
+      {loading && <div className="text-gray-500">読込中…</div>}
+
       <ul className="space-y-2">
-        {posts.length === 0 && <li className="text-gray-500">まだ投稿がありません</li>}
+        {!loading && posts.length === 0 && (
+          <li className="text-gray-500">まだ投稿がありません</li>
+        )}
         {posts.map(p => (
           <li key={p.id} className="border-b py-3">
             <div className="text-sm text-gray-500 mb-1">
-              @{p.profiles?.handle} ({p.profiles?.display_name})
+              @{p.profiles?.handle || 'unknown'} ({p.profiles?.display_name || '名無し'})
             </div>
             {p.body && <div className="whitespace-pre-wrap mb-2">{p.body}</div>}
             {p.image_url && (
-              <img 
-                src={p.image_url} 
-                alt="" 
+              <img
+                src={p.image_url}
+                alt=""
                 className="mt-2 rounded-lg max-h-96 border"
               />
             )}
@@ -209,13 +224,13 @@ export default function Home() {
               </button>
               {user && p.user_id === user.id && (
                 <>
-                  <button 
-                    onClick={() => editPost(p.id, p.body)}
+                  <button
+                    onClick={() => editPost(p.id, p.body || '')}
                     className="text-blue-500 hover:underline"
                   >
                     編集
                   </button>
-                  <button 
+                  <button
                     onClick={() => deletePost(p.id)}
                     className="text-red-500 hover:underline"
                   >
