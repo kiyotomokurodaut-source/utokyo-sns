@@ -2,7 +2,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
-
 export default function Search() {
   const router = useRouter()
   const [query, setQuery] = useState('')
@@ -18,61 +17,69 @@ export default function Search() {
   }, [])
 
   const loadMyFollows = async (userId: string) => {
-    const { data } = await supabase.from('follows').select('following_id').eq('follower_id', userId)
+    const { data } = await supabase
+      .from('follows')
+      .select('following_id')
+      .eq('follower_id', userId)
     setMyFollows(data?.map(f => f.following_id) || [])
   }
 
-  const handleSearch = async () => {
+  const search = async () => {
     if (!query.trim()) return
     const { data } = await supabase
       .from('profiles')
-      .select('*')
-      .or(`handle.ilike.%${query}%,display_name.ilike.%${query}%,faculty.ilike.%${query}%`)
+      .select('id, handle, display_name, faculty, grade')
+      .or(`handle.ilike.%${query}%,display_name.ilike.%${query}%`)
       .limit(20)
     setResults(data || [])
   }
 
   const toggleFollow = async (targetId: string) => {
-    if (!user) return
-    const isFollowing = myFollows.includes(targetId)
-
-    if (isFollowing) {
-      await supabase.from('follows').delete().eq('follower_id', user.id).eq('following_id', targetId)
+    if (!user) return alert('ログインしてください')
+    if (myFollows.includes(targetId)) {
+      await supabase.from('follows').delete()
+        .eq('follower_id', user.id).eq('following_id', targetId)
       setMyFollows(myFollows.filter(id => id !== targetId))
     } else {
-      await supabase.from('follows').insert({ follower_id: user.id, following_id: targetId })
+      await supabase.from('follows').insert({
+        follower_id: user.id,
+        following_id: targetId,
+      })
       setMyFollows([...myFollows, targetId])
     }
   }
 
   return (
-    <div className="max-w-xl mx-auto p-4 min-h-screen bg-white">
-      <div className="flex items-center gap-4 mb-6">
-        <button onClick={() => router.push('/')} className="text-2xl">←</button>
-        <input 
-          className="flex-1 bg-gray-100 rounded-full px-4 py-2 outline-none border focus:border-blue-500"
-          placeholder="名前、学部、@ハンドルで検索"
+    <div className="max-w-xl mx-auto p-4">
+      <h1 className="text-2xl font-bold mb-4">ユーザー検索</h1>
+      <div className="flex gap-2 mb-4">
+        <input
+          className="border p-2 flex-1 rounded"
           value={query}
           onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSearch()}
+          onKeyDown={e => e.key === 'Enter' && search()}
+          placeholder="ハンドル/名前で検索"
         />
+        <button onClick={search} className="bg-blue-500 text-white px-4 rounded">
+          検索
+        </button>
       </div>
-
-      <ul className="divide-y">
+      <ul className="space-y-2">
         {results.map(p => (
-          <li key={p.id} className="py-4 flex items-center justify-between">
-            <div className="flex gap-3 items-center">
-              <img src={p.avatar_url || 'https://via.placeholder.com/50'} className="w-12 h-12 rounded-full object-cover border" />
-              <div>
-                <div className="font-bold">{p.display_name}</div>
-                <div className="text-gray-500 text-sm">@{p.handle} · {p.faculty}</div>
+          <li key={p.id} className="border-b py-2 flex justify-between items-center">
+            <div>
+              <div className="font-bold">@{p.handle}</div>
+              <div className="text-sm text-gray-600">
+                {p.display_name} · {p.faculty} {p.grade}年
               </div>
             </div>
-            {user && user.id !== p.id && (
-              <button 
+            {user && p.id !== user.id && (
+              <button
                 onClick={() => toggleFollow(p.id)}
-                className={`px-4 py-1 rounded-full font-bold text-sm border ${
-                  myFollows.includes(p.id) ? 'bg-white text-black border-gray-300' : 'bg-black text-white border-black'
+                className={`px-3 py-1 rounded text-sm ${
+                  myFollows.includes(p.id)
+                    ? 'bg-gray-200 text-gray-700'
+                    : 'bg-blue-500 text-white'
                 }`}
               >
                 {myFollows.includes(p.id) ? 'フォロー解除' : 'フォロー'}
@@ -80,7 +87,9 @@ export default function Search() {
             )}
           </li>
         ))}
-        {query && results.length === 0 && <p className="text-center text-gray-500 mt-10">ユーザーが見つかりませんでした</p>}
+        {query && results.length === 0 && (
+          <p className="text-gray-500">ユーザーが見つかりません</p>
+        )}
       </ul>
     </div>
   )
